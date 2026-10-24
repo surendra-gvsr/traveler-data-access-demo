@@ -25,9 +25,17 @@ SQLite transaction per event, so a crash mid-event leaves no partial profile.
 | Class | Examples | Update rule | Safe under replay? | Safe under reorder? |
 |---|---|---|---|---|
 | **Counter** (commutative) | `search_count`, `booking_count`, `cancellation_count`, `destination_counts`, `cabin_counts`, `nights_total`, `lead_time_days_total` | add the delta | only via `event_id` dedupe | yes — addition commutes |
-| **Last-write-wins** (order-sensitive) | `last_search_destination`, `last_search_depart_date`, `home_origin`, `party_adults`, `party_children`, `preferred_currency`, PII (`full_name`, `email`, `phone`) | overwrite **only if** `event.source_version > profile.last_source_version` | yes — idempotent overwrite | yes — guarded by version |
+| **Last-write-wins** (order-sensitive) | `last_search_destination`, `last_search_depart_date`, `home_origin`, `party_adults`, `party_children`, `preferred_currency`, PII (`full_name`, `email`, `phone`) | overwrite **only if** `event.source_version > field_versions[field]` | yes — idempotent overwrite | yes — guarded per field |
 | **Watermark** | `last_source_version`, `last_occurred_at`, `profile_version`, `updated_at` | monotonic max / increment | yes | yes |
 | **Consent** | `ai_access`, `purposes` | last-write-wins, **versioned independently** | yes | yes |
+
+**The stale guard is per field, not per profile.** Each LWW field carries its own
+watermark in a `field_versions` JSON column. A single profile-wide watermark looks
+equivalent and is not: searches and bookings write overlapping but different field sets,
+so a search at v10 arriving before a booking at v4 would mark the booking stale and block
+it from ever setting `preferred_currency` — a field no search writes. The field would stay
+`NULL` permanently, and nothing would report an error. Criterion B5 is what catches this;
+it only holds with per-field versions.
 
 Consent gets its own row in `consent_state` rather than living on the profile, and its
 own version watermark (`consent_source_version`). Two reasons, both practical:
@@ -57,10 +65,11 @@ transaction, so a concurrent second delivery cannot slip between the two steps.
 
 - `APPLIED` — new event, counters added, LWW fields taken.
 - `DUPLICATE` — `event_id` already in the ledger. No mutation at all.
-- `APPLIED_STALE` — new event, but `source_version <= last_source_version`. Counters are
-  still added (the event really happened and addition commutes), LWW fields are
-  **skipped**. This is the interesting case and the one most pipelines get wrong: a late
-  event is not a nothing, it is a partial something.
+- `APPLIED_STALE` — new event, but at least one of its LWW fields already has a newer
+  write. Counters are still added (the event really happened and addition commutes), the
+  contested fields are **skipped**, and any uncontested ones still land. This is the
+  interesting case and the one most pipelines get wrong: a late event is not a nothing,
+  it is a partial something.
 
 `profile_version` increments on `APPLIED` and `APPLIED_STALE`, never on `DUPLICATE`, and
 is what the access layer reports as provenance.
