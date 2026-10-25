@@ -10,16 +10,22 @@ Every tool is a thin wrapper: build an `AccessRequest`, call `access.serve`, sha
 reply. No tool reads SQLite directly, which is what makes the four controls in spec 004
 impossible to skip (verified by `tests/test_mcp_tools.py::test_server_has_no_direct_store_access`).
 
+Who is asking and why are properties of the deployment, not arguments the model gets to
+choose. If `purpose` were a tool parameter, a trip-planning agent refused for a traveler
+who consented only to `support` could call again claiming `support` and be served. So
+each server is launched for one agent with one purpose, and no tool accepts either.
+
 Run: python -m traveler_access.mcp_server     (stdio transport)
-Env: TRAVELER_DB  — path to the profile store, default data/profiles.db
-     TRAVELER_AUDIT — path to the audit log, default data/audit.jsonl
+Env: TRAVELER_DB      — path to the profile store, default data/profiles.db
+     TRAVELER_AUDIT   — path to the audit log, default data/audit.jsonl
+     TRAVELER_PURPOSE — the purpose this deployment serves, default trip_planning
+     TRAVELER_CALLER  — the caller identity written to the audit log, default mcp
 """
 
 from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -39,7 +45,9 @@ DENIAL_GUIDANCE = (
     "not guess at the answer from other sources."
 )
 
-mcp = FastMCP("traveler-data-access")
+# WARNING, not the default INFO: the per-request "Processing request" lines go to
+# stderr and would otherwise interleave with the demo's own output.
+mcp = FastMCP("traveler-data-access", log_level="WARNING")
 
 _conn: sqlite3.Connection | None = None
 
@@ -53,6 +61,16 @@ def connection() -> sqlite3.Connection:
 
 def audit_path() -> Path:
     return Path(os.environ.get("TRAVELER_AUDIT", str(audit.DEFAULT_AUDIT_PATH)))
+
+
+def deployment_purpose() -> str:
+    """The one purpose this server was launched to serve. Never taken from the model."""
+    return os.environ.get("TRAVELER_PURPOSE") or access.DEFAULT_PURPOSE
+
+
+def deployment_caller() -> str:
+    """The caller identity recorded in the audit log. Never taken from the model."""
+    return os.environ.get("TRAVELER_CALLER") or "mcp"
 
 
 class Result(BaseModel):
@@ -97,20 +115,13 @@ def _call(request: access.AccessRequest) -> access.AccessResponse:
 )
 def get_traveler_preferences(
     traveler_id: str = Field(description="Pseudonymous traveler id, e.g. trv_003."),
-    purpose: str = Field(
-        default=access.DEFAULT_PURPOSE,
-        description=(
-            "Why the data is being used. Must be a purpose the traveler consented to; "
-            "'trip_planning' for itinerary and recommendation work."
-        ),
-    ),
 ) -> PreferencesResult:
     response = _call(
         access.AccessRequest(
             tool="get_traveler_preferences",
             traveler_id=traveler_id,
-            purpose=purpose,
-            caller="mcp",
+            purpose=deployment_purpose(),
+            caller=deployment_caller(),
         )
     )
     # Re-validated from the serialised payload the scrubber inspected, so what the
@@ -147,15 +158,16 @@ def get_recent_searches(
         ),
     ),
     limit: int = Field(default=10, ge=1, le=50, description="Maximum search rows to return."),
-    purpose: str = Field(default=access.DEFAULT_PURPOSE, description="Consented purpose of use."),
 ) -> RecentSearchesResult:
     response = _call(
         access.AccessRequest(
             tool="get_recent_searches",
             traveler_id=traveler_id,
-            purpose=purpose,
-            caller="mcp",
-            as_of=datetime.fromisoformat(as_of) if as_of else None,
+            purpose=deployment_purpose(),
+            caller=deployment_caller(),
+            # Passed through unparsed: `serve` parses it, so a malformed value is
+            # denied and audited rather than raising before the audit record exists.
+            as_of=as_of or None,
             params={"window_days": window_days, "limit": limit},
         )
     )
@@ -185,7 +197,11 @@ def get_recent_searches(
     )
 )
 def list_travelers() -> TravelerListingResult:
-    response = _call(access.AccessRequest(tool="list_travelers", caller="mcp"))
+    response = _call(
+        access.AccessRequest(
+            tool="list_travelers", purpose=deployment_purpose(), caller=deployment_caller()
+        )
+    )
     data = response.data or {}
     return TravelerListingResult(
         status=response.status,

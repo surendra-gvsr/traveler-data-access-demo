@@ -1,4 +1,4 @@
-"""Spec: specs/005-mcp-tool-contract.md — criteria E1-E7.
+"""Spec: specs/005-mcp-tool-contract.md — criteria E1-E9.
 
 The output schemas *are* the privacy policy as far as a model is concerned: a field
 that is not in a schema cannot be requested, inferred, or prompted out. So E2 is
@@ -17,8 +17,9 @@ from pathlib import Path
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.server.fastmcp.exceptions import ToolError
 
-from traveler_access import audit, consent, generate, pii, store
+from traveler_access import access, audit, consent, generate, pii, store
 from traveler_access import mcp_server
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -244,6 +245,67 @@ def test_e6_the_mcp_server_imports_no_sql_layer_beyond_connecting():
     store_uses = [line.strip() for line in source.splitlines() if "store." in line]
     assert len(store_uses) == 1, store_uses
     assert store_uses[0].startswith("_conn = store.connect(")
+
+
+# --- E8: who is asking, and why, comes from the deployment ------------------------
+
+
+async def test_e8_no_tool_lets_the_model_choose_its_purpose_or_identity(server):
+    for tool in await server.list_tools():
+        arguments = set(tool.inputSchema.get("properties", {}))
+        assert "purpose" not in arguments, tool.name
+        assert "caller" not in arguments, tool.name
+
+
+async def test_e8_a_claimed_purpose_does_not_unlock_a_narrow_consent(server):
+    """The bypass this criterion exists for: refused, then ask again claiming 'support'."""
+    for arguments in (
+        {"traveler_id": generate.NARROW_PURPOSE_TRAVELER},
+        {"traveler_id": generate.NARROW_PURPOSE_TRAVELER, "purpose": "support"},
+    ):
+        try:
+            result = _payload(await server.call_tool("get_traveler_preferences", arguments))
+        except ToolError:
+            continue  # an SDK that rejects the unknown argument outright also refuses
+        assert result["status"] == "DENIED", arguments
+        assert result["reason_code"] == consent.PURPOSE_NOT_PERMITTED
+        assert result.get("preferences") is None
+
+
+async def test_e8_the_deployment_decides_the_purpose_and_the_audited_caller(
+    server, built_conn, audit_path, monkeypatch
+):
+    """Otherwise E8 would pass simply because this traveler is denied everything."""
+    narrow = consent.load_consent(built_conn, generate.NARROW_PURPOSE_TRAVELER).purposes[0]
+    monkeypatch.setenv("TRAVELER_PURPOSE", narrow)
+    monkeypatch.setenv("TRAVELER_CALLER", "support-agent")
+
+    result = _payload(await server.call_tool(
+        "get_traveler_preferences", {"traveler_id": generate.NARROW_PURPOSE_TRAVELER}
+    ))
+    assert result["status"] == "OK"
+
+    record = audit.read_all(audit_path)[-1]
+    assert record["purpose"] == narrow
+    assert record["caller"] == "support-agent"
+
+
+# --- E9: a bad argument is a denial, and is audited -------------------------------
+
+
+async def test_e9_a_malformed_as_of_is_denied_and_audited(server, audit_path):
+    before = len(audit.read_all(audit_path))
+
+    result = _payload(await server.call_tool(
+        "get_recent_searches", {"traveler_id": generate.DEMO_TRAVELER, "as_of": "not-a-date"}
+    ))
+
+    assert result["status"] == "DENIED"
+    assert result["reason_code"] == access.INVALID_ARGUMENT
+    assert result.get("searches") is None
+    records = audit.read_all(audit_path)
+    assert len(records) == before + 1
+    assert records[-1]["reason_code"] == access.INVALID_ARGUMENT
 
 
 # --- E7: a real stdio session -----------------------------------------------------

@@ -334,6 +334,35 @@ def test_a_traveler_scoped_tool_requires_a_traveler_id(built_conn, audit_path):
     assert response.reason_code == access.MISSING_TRAVELER_ID
 
 
+def test_a_malformed_as_of_is_denied_and_audited_not_raised(built_conn, audit_path):
+    """D8 says every call is audited. An exception before `serve` would break that."""
+    response = _serve(
+        built_conn, audit_path, "get_recent_searches",
+        traveler_id=generate.DEMO_TRAVELER, as_of="last tuesday",
+    )
+
+    assert response.status == "DENIED"
+    assert response.reason_code == access.INVALID_ARGUMENT
+    assert response.data is None
+    assert audit.read_all(audit_path)[-1]["reason_code"] == access.INVALID_ARGUMENT
+
+
+def test_an_iso_string_as_of_means_the_same_as_the_datetime(built_conn, audit_path):
+    instant = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+    as_datetime = _serve(
+        built_conn, audit_path, "get_recent_searches",
+        traveler_id=generate.DEMO_TRAVELER, as_of=instant,
+    )
+    as_string = _serve(
+        built_conn, audit_path, "get_recent_searches",
+        traveler_id=generate.DEMO_TRAVELER, as_of=instant.isoformat(),
+    )
+
+    assert as_string.status == as_datetime.status == "OK"
+    assert as_string.data["features"]["as_of"] == as_datetime.data["features"]["as_of"]
+    assert as_string.data["searches"] == as_datetime.data["searches"]
+
+
 # --- D9: provenance ---------------------------------------------------------------
 
 

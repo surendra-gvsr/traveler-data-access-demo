@@ -31,9 +31,18 @@ UNKNOWN_TOOL = "UNKNOWN_TOOL"
 MISSING_TRAVELER_ID = "MISSING_TRAVELER_ID"
 NO_PROFILE_YET = "NO_PROFILE_YET"
 PII_LEAK_BLOCKED = "PII_LEAK_BLOCKED"
+INVALID_ARGUMENT = "INVALID_ARGUMENT"
 INTERNAL_ERROR = "INTERNAL_ERROR"
 
 DEFAULT_PURPOSE = "trip_planning"
+
+
+class InvalidArgument(ValueError):
+    """A caller-supplied argument could not be interpreted.
+
+    Raised inside `serve` so that a bad argument becomes an audited `DENIED` envelope
+    rather than an exception that escapes before the audit record is written.
+    """
 
 
 class AccessRequest(BaseModel):
@@ -43,7 +52,9 @@ class AccessRequest(BaseModel):
     traveler_id: str | None = None
     purpose: str = DEFAULT_PURPOSE
     caller: str = "unknown"
-    as_of: datetime | None = None
+    # A string is accepted and parsed inside `serve`, so that a malformed timestamp
+    # from a model is denied and audited like any other call (spec 005, E9).
+    as_of: datetime | str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -94,6 +105,8 @@ def serve(
             response = denied(MISSING_TRAVELER_ID, "This tool requires a traveler_id.")
         else:
             response = _serve_allowed(conn, request, request_id, handler, denied)
+    except InvalidArgument as bad:
+        response = denied(INVALID_ARGUMENT, str(bad))
     except pii.PIILeakError as leak:
         # Fail the response rather than mask it: a masked leak ships quietly.
         response = denied(
@@ -160,7 +173,7 @@ def _serve_allowed(
     )
 
 
-def resolve_as_of(conn: sqlite3.Connection, requested: datetime | None) -> datetime:
+def resolve_as_of(conn: sqlite3.Connection, requested: datetime | str | None) -> datetime:
     """Default `as_of` is the platform's knowledge watermark, not wall-clock now.
 
     The dataset is synthetic and ends at a fixed point, so wall-clock now would put
@@ -168,6 +181,11 @@ def resolve_as_of(conn: sqlite3.Connection, requested: datetime | None) -> datet
     definition of "now" for a data platform: it is the latest moment we actually know
     anything about.
     """
+    if isinstance(requested, str):
+        try:
+            requested = datetime.fromisoformat(requested)
+        except ValueError:
+            raise InvalidArgument("as_of must be an ISO-8601 timestamp.") from None
     if requested is not None:
         return utc(requested)
     watermark = store.knowledge_watermark(conn)
