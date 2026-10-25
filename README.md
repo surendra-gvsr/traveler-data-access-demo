@@ -18,7 +18,7 @@ ways of going quietly wrong:
 
 **It sees personal information it never needed.** The traveler's email is sitting in the
 same row as their favourite destination. Nothing about answering the question requires it,
-but nothing stops it travelling either — into the prompt, the model's context, the logs,
+but nothing stops it travelling either  into the prompt, the model's context, the logs,
 and anywhere the response is forwarded.
 
 **It acts on data that arrived out of order.** Events are replayed, retried and delayed.
