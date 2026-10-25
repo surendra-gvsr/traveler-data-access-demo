@@ -48,6 +48,16 @@ def iso(dt: datetime) -> str:
     return utc(dt).isoformat()
 
 
+def now() -> datetime:
+    """The current instant, in the same shape as every stored timestamp.
+
+    Not `utc(datetime.now())`: that returns naive *local* time, which `utc` then labels
+    as UTC rather than converting. The result is a timestamp wrong by the machine's
+    offset — correct on a UTC server, silently off by hours anywhere else.
+    """
+    return utc(datetime.now(timezone.utc))
+
+
 class Event(BaseModel):
     model_config = ConfigDict(frozen=True)
 

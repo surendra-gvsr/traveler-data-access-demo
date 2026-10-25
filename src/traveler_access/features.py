@@ -18,7 +18,7 @@ from typing import Iterable
 
 from pydantic import BaseModel, ConfigDict
 
-from .events import EventType, iso, utc
+from .events import EventType, iso, now, utc
 
 SEARCH_WINDOW_DAYS = 30
 BOOKING_WINDOW_DAYS = 90
@@ -145,7 +145,7 @@ def compute_features(
     return FeatureSet(
         traveler_id=traveler_id,
         as_of=as_of,
-        computed_at=utc(datetime.now()),
+        computed_at=now(),
         visible_event_count=len(events),
         searches_last_30d=len(searches),
         distinct_destinations_last_30d=len({e.payload["destination"] for e in searches}),

@@ -24,7 +24,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import audit, consent, features, pii, profiles, provenance, store
-from .events import utc
+from .events import now, utc
 from .provenance import Provenance
 
 UNKNOWN_TOOL = "UNKNOWN_TOOL"
@@ -105,7 +105,7 @@ def serve(
         decision = response.status if response else INTERNAL_ERROR
         audit.append(
             audit.AuditRecord(
-                ts=audit.now(),
+                ts=now(),
                 request_id=request_id,
                 caller=request.caller,
                 tool=request.tool,
@@ -171,7 +171,7 @@ def resolve_as_of(conn: sqlite3.Connection, requested: datetime | None) -> datet
     if requested is not None:
         return utc(requested)
     watermark = store.knowledge_watermark(conn)
-    return utc(datetime.fromisoformat(watermark)) if watermark else utc(datetime.now())
+    return utc(datetime.fromisoformat(watermark)) if watermark else now()
 
 
 # --- Handlers ---------------------------------------------------------------------

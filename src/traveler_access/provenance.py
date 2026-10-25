@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from .events import PIPELINE_VERSION, utc
+from .events import PIPELINE_VERSION, now, utc
 
 
 class Provenance(BaseModel):
@@ -45,7 +45,7 @@ def build(
     return Provenance(
         source=source,
         version=version,
-        computed_at=utc(datetime.now()),
+        computed_at=now(),
         as_of=as_of,
         event_count=event_count,
         freshness_seconds=freshness,

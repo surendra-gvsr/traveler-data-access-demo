@@ -12,7 +12,7 @@ common way a privacy control turns into a privacy liability.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -71,7 +71,3 @@ def read_all(path: Path | str = DEFAULT_AUDIT_PATH) -> list[dict]:
 
 def tail(count: int = 5, path: Path | str = DEFAULT_AUDIT_PATH) -> list[dict]:
     return read_all(path)[-count:]
-
-
-def now() -> datetime:
-    return datetime.now(timezone.utc)

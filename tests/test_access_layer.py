@@ -8,12 +8,12 @@ if a control can be bypassed, it will be bypassed here, one layer below the tool
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import BaseModel
 
-from traveler_access import access, audit, consent, generate, pii, profiles, store
+from traveler_access import access, audit, consent, events, generate, pii, profiles, store
 from traveler_access.events import utc
 from traveler_access.provenance import Provenance
 
@@ -202,7 +202,7 @@ def test_d7_a_leaking_handler_is_blocked_rather_than_served(built_conn, audit_pa
         )
         return bad, Provenance(
             source="profile_store", version=1,
-            computed_at=utc(datetime.now()), as_of=as_of, event_count=1,
+            computed_at=events.now(), as_of=as_of, event_count=1,
             pipeline_version="test", freshness_seconds=0,
         )
 
@@ -286,7 +286,7 @@ def test_d8_the_audit_log_records_field_names_but_no_values(built_conn, audit_pa
 def test_d8_a_pii_field_name_in_an_audit_record_is_rejected(audit_path):
     with pytest.raises(ValueError):
         audit.AuditRecord(
-            ts=audit.now(), request_id="x", caller="test", tool="t",
+            ts=events.now(), request_id="x", caller="test", tool="t",
             traveler_id="trv_001", purpose="trip_planning", decision="OK",
             reason_code=None, fields_returned=["search_count", "email"],
             provenance=None, duration_ms=1,
@@ -351,6 +351,23 @@ def test_d9_every_success_carries_complete_provenance(built_conn, audit_path, to
     assert prov.pipeline_version
     assert prov.event_count > 0
     assert prov.freshness_seconds >= 0
+
+
+def test_d9_computed_at_is_a_real_utc_instant_not_local_time_relabelled(
+    built_conn, audit_path
+):
+    """`utc(datetime.now())` labels naive local time as UTC instead of converting it.
+
+    That produces a `computed_at` wrong by the machine's offset — and `freshness_seconds`
+    with it. It is invisible on a UTC host, which is exactly why it survived until the
+    demo printed a timestamp five hours behind the audit record next to it.
+    """
+    before = datetime.now(timezone.utc)
+    response = _serve(built_conn, audit_path, traveler_id=generate.DEMO_TRAVELER)
+    after = datetime.now(timezone.utc)
+
+    # Whole-second truncation can put `computed_at` up to a second before `before`.
+    assert before - timedelta(seconds=1) <= response.provenance.computed_at <= after
 
 
 def test_d9_provenance_is_copied_into_the_audit_record(built_conn, audit_path):
