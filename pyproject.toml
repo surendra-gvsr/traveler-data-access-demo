@@ -9,7 +9,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-demo = ["anthropic>=0.40"]
+# 2.3 is a real floor, not politeness: demo/ask_claude.py passes `cache_control`
+# as a top-level parameter, which older SDKs reject.
+demo = ["anthropic>=2.3"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [build-system]

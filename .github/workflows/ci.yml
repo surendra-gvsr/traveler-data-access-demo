@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install ".[dev]"
+
+      # The test suite is hermetic: every test builds its own database in a
+      # temporary directory, so this needs no generated data.
+      - name: Tests
+        run: python -m pytest -q
+
+      # Runs the README's own commands against a clean checkout, so the
+      # instructions cannot rot without this failing.
+      - name: Pipeline end to end
+        run: |
+          python -m traveler_access.generate
+          python -m traveler_access.pipeline load --reset
+          python -m traveler_access.pipeline build
+          python -m traveler_access.pipeline status
+
+      # Exercises the MCP server over a real stdio subprocess and asserts, at
+      # the end of its own run, that no PII crossed the boundary.
+      - name: Demo, without a model
+        run: python demo/ask_claude.py --dry-run
