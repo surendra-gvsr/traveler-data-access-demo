@@ -23,7 +23,21 @@ response. **No tool touches SQLite directly** — that invariant is what makes
 [004](004-ai-safe-access-layer.md) unskippable, and it is cheap to verify by grepping
 this file for store access.
 
-### `get_traveler_preferences(traveler_id, purpose="trip_planning")`
+### Who is asking, and why, is not the model's to say
+
+`purpose` and `caller` are properties of the *deployment*, not arguments the model
+supplies. A server is launched for one agent with one job — `TRAVELER_PURPOSE` and
+`TRAVELER_CALLER` in its environment, defaulting to `trip_planning` and `mcp` — and every
+request it makes carries those values.
+
+The alternative looks harmless and is not. If `purpose` were a tool argument, a
+trip-planning agent denied `PURPOSE_NOT_PERMITTED` for a traveler who consented only to
+`support` could simply call again with `purpose="support"` and be served. Purpose
+limitation that the caller declares for itself is not a control. A real system would
+authenticate the agent and look its permitted purposes up; an environment variable is
+the smallest honest stand-in for that.
+
+### `get_traveler_preferences(traveler_id)`
 
 Returns the derived preference view: `top_destinations`, `preferred_cabin`,
 `typical_party_size`, `avg_trip_length_nights`, `avg_booking_lead_time_days`,
@@ -92,3 +106,10 @@ reviewable without a key.
 - E6 `mcp_server.py` contains no direct store or SQL access — all reads go through
   `serve`.
 - E7 Tools are callable over a real stdio MCP session, not just as Python functions.
+- E8 No tool accepts `purpose` (or `caller`) as an argument. The narrow-purpose traveler
+  is denied `PURPOSE_NOT_PERMITTED` through the tools under the default deployment, even
+  when a client tries to pass `purpose="support"`, and is served only by a server
+  *deployed* with `TRAVELER_PURPOSE=support`.
+- E9 A malformed argument (e.g. an `as_of` that is not ISO-8601) returns a `DENIED` /
+  `INVALID_ARGUMENT` envelope and is audited like any other call, rather than surfacing
+  as an unaudited tool exception.
