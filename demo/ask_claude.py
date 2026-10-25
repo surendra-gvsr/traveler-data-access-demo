@@ -102,12 +102,19 @@ def server_params(db: Path, audit_log: Path) -> StdioServerParameters:
     )
 
 
+# Every request id a tool returned in this run, so the audit section at the end shows
+# exactly this run's records and not whatever earlier runs left in the append-only log.
+RUN_REQUEST_IDS: set[str] = set()
+
+
 async def call_tool(session: ClientSession, name: str, arguments: dict) -> tuple[str, bool]:
     """Run one tool and return its payload as JSON text, plus whether it failed."""
     result = await session.call_tool(name, arguments)
     if result.structuredContent is None:
         # A transport-level failure, as distinct from a DENIED result.
         return json.dumps({"error": "tool returned no structured content"}), True
+    if result.structuredContent.get("request_id"):
+        RUN_REQUEST_IDS.add(result.structuredContent["request_id"])
     return json.dumps(result.structuredContent, default=str, sort_keys=True), bool(result.isError)
 
 
@@ -260,7 +267,6 @@ async def run(args: argparse.Namespace) -> int:
 
     # Everything the model was shown or said, checked for leaks at the end.
     seen: list[str] = []
-
     async with stdio_client(server_params(args.db, args.audit)) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -299,8 +305,16 @@ async def run(args: argparse.Namespace) -> int:
         return 1
     print("  no PII field name, no known PII value, no email or phone pattern")
 
-    banner("Audit trail written by the server subprocess")
-    for record in audit.tail(8, args.audit):
+    banner("Audit trail written by the server subprocess during this run")
+    # The audit log is append-only and outlives runs, so select this run's records by the
+    # request ids the tools returned, rather than by position or timestamp.
+    this_run = [
+        record for record in audit.read_all(args.audit)
+        if record["request_id"] in RUN_REQUEST_IDS
+    ]
+    if not this_run:
+        print("  (no records: the server wrote nothing during this run)")
+    for record in this_run:
         print(
             f"  {record['ts']}  {record['caller']:<12}  {record['tool']:<26} "
             f"{record['traveler_id'] or '-':<8} {record['decision']:<7} "
