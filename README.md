@@ -1,6 +1,6 @@
 # traveler-data-access-demo
 
-[![tests](https://github.com/surendra-gvsr/traveler-data-access-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/surendra-gvsr/traveler-data-access-demo/actions/workflows/ci.yml)
+[![tests](https://github.com/venkata-gv/traveler-data-access-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/venkata-gv/traveler-data-access-demo/actions/workflows/ci.yml)
 
 Governed, AI-safe access to customer data: consent, PII removal, provenance and audit at
 the boundary where a model asks a question.
